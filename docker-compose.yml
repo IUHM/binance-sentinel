@@ -28,6 +28,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      PORT: 8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,6 +60,9 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}
     restart: unless-stopped
+    environment:
+      API_UPSTREAM: api:8000
+      PORT: 80
     depends_on:
       api:
         condition: service_healthy

@@ -19,6 +19,7 @@ RUN pnpm build
 FROM nginx:1.27-alpine
 
 ENV API_UPSTREAM=api:8000
+ENV PORT=80
 
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html

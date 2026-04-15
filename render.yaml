@@ -1,0 +1,89 @@
+services:
+  - type: web
+    name: binance-sentinel-api
+    runtime: docker
+    region: singapore
+    plan: starter
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: binance-sentinel-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: BINANCE_REST_BASE_URL
+        value: https://fapi.binance.com
+      - key: BINANCE_WS_BASE_URL
+        value: wss://fstream.binance.com
+      - key: SYMBOL_REFRESH_SECONDS
+        value: "1800"
+      - key: INTEL_POLL_SECONDS
+        value: "60"
+      - key: FUNDING_HISTORY_SAMPLE_SECONDS
+        value: "120"
+      - key: FUNDING_HISTORY_RETENTION_HOURS
+        value: "72"
+      - key: LOG_LEVEL
+        value: INFO
+
+  - type: worker
+    name: binance-sentinel-worker
+    runtime: docker
+    region: singapore
+    plan: starter
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    dockerCommand: python -m backend.worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: binance-sentinel-db
+          property: connectionString
+      - key: BINANCE_REST_BASE_URL
+        value: https://fapi.binance.com
+      - key: BINANCE_WS_BASE_URL
+        value: wss://fstream.binance.com
+      - key: SYMBOL_REFRESH_SECONDS
+        value: "1800"
+      - key: INTEL_POLL_SECONDS
+        value: "60"
+      - key: FUNDING_HISTORY_SAMPLE_SECONDS
+        value: "120"
+      - key: FUNDING_HISTORY_RETENTION_HOURS
+        value: "72"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: OFFICIAL_RSS_URLS
+        value: ""
+      - key: MEDIA_RSS_URLS
+        value: https://www.coindesk.com/arc/outboundfeeds/rss/,https://decrypt.co/feed,https://cointelegraph.com/rss
+      - key: X_SOURCE_TEMPLATE
+        value: ""
+      - key: X_WHITELIST
+        value: binance,lookonchain,WuBlockchain
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  - type: web
+    name: binance-sentinel-web
+    runtime: docker
+    region: singapore
+    plan: starter
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: API_UPSTREAM
+        fromService:
+          type: web
+          name: binance-sentinel-api
+          property: hostport
+
+databases:
+  - name: binance-sentinel-db
+    databaseName: sentinel
+    user: sentinel

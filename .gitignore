@@ -1,0 +1,17 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+frontend/node_modules/
+frontend/dist/
+
+logs/
+*.log
+
+.env
+sentinel.db
+
+binance_sentinel.egg-info/

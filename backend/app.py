@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.storage import DEFAULT_RULES, SentinelStore
 
 
 load_dotenv()
+LOGGER = logging.getLogger("binance-sentinel.app")
 
 
 def _load_database_url() -> str:
@@ -26,8 +32,35 @@ def _load_allowed_origins() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_frontend_dist_dir() -> Path | None:
+    candidates: list[Path] = []
+    custom = os.getenv("FRONTEND_DIST_DIR")
+    if custom:
+        candidates.append(Path(custom))
+
+    project_root = Path(__file__).resolve().parents[1]
+    candidates.append(project_root / "frontend" / "dist")
+    candidates.append(Path("/app/frontend_dist"))
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists() and (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
 store = SentinelStore(_load_database_url())
 store.bootstrap()
+frontend_dist_dir = _resolve_frontend_dist_dir()
+embedded_worker_task: asyncio.Task[None] | None = None
 
 app = FastAPI(title="币安永续异动哨兵 API", version="0.2.0")
 app.add_middleware(
@@ -51,6 +84,39 @@ class RulesPayload(BaseModel):
     wall_cooldown_minutes: int = Field(default=DEFAULT_RULES["wall_cooldown_minutes"], ge=1)
     depth_confirm_seconds: float = Field(default=DEFAULT_RULES["depth_confirm_seconds"], ge=0.5)
     dashboard_flush_top_n: int = Field(default=DEFAULT_RULES["dashboard_flush_top_n"], ge=5, le=100)
+
+
+async def _run_embedded_worker() -> None:
+    from backend.worker import SentinelWorker, load_settings
+
+    worker = SentinelWorker(load_settings())
+    try:
+        await worker.run()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        LOGGER.exception("Embedded worker crashed")
+
+
+@app.on_event("startup")
+async def startup_embedded_worker() -> None:
+    global embedded_worker_task
+
+    if not _env_flag("ENABLE_EMBEDDED_WORKER") or embedded_worker_task is not None:
+        return
+    embedded_worker_task = asyncio.create_task(_run_embedded_worker())
+
+
+@app.on_event("shutdown")
+async def shutdown_embedded_worker() -> None:
+    global embedded_worker_task
+
+    if embedded_worker_task is None:
+        return
+    embedded_worker_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await embedded_worker_task
+    embedded_worker_task = None
 
 
 @app.get("/health")
@@ -133,6 +199,27 @@ async def dashboard_stream(websocket: WebSocket) -> None:
         return
     except RuntimeError:
         return
+
+
+if frontend_dist_dir and (frontend_dist_dir / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=frontend_dist_dir / "assets"), name="frontend-assets")
+
+
+if frontend_dist_dir:
+
+    @app.get("/", include_in_schema=False)
+    async def frontend_index() -> FileResponse:
+        return FileResponse(frontend_dist_dir / "index.html")
+
+
+    @app.get("/{frontend_path:path}", include_in_schema=False)
+    async def frontend_catchall(frontend_path: str) -> FileResponse:
+        if frontend_path.startswith(("api/", "ws/", "health")):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = frontend_dist_dir / frontend_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(frontend_dist_dir / "index.html")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: binance-sentinel-api
+    name: binance-sentinel
     runtime: docker
     region: singapore
-    plan: starter
+    plan: free
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
     healthCheckPath: /health
@@ -14,34 +14,8 @@ services:
           property: connectionString
       - key: CORS_ORIGINS
         value: "*"
-      - key: BINANCE_REST_BASE_URL
-        value: https://fapi.binance.com
-      - key: BINANCE_WS_BASE_URL
-        value: wss://fstream.binance.com
-      - key: SYMBOL_REFRESH_SECONDS
-        value: "1800"
-      - key: INTEL_POLL_SECONDS
-        value: "60"
-      - key: FUNDING_HISTORY_SAMPLE_SECONDS
-        value: "120"
-      - key: FUNDING_HISTORY_RETENTION_HOURS
-        value: "72"
-      - key: LOG_LEVEL
-        value: INFO
-
-  - type: worker
-    name: binance-sentinel-worker
-    runtime: docker
-    region: singapore
-    plan: starter
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: .
-    dockerCommand: python -m backend.worker
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: binance-sentinel-db
-          property: connectionString
+      - key: ENABLE_EMBEDDED_WORKER
+        value: "true"
       - key: BINANCE_REST_BASE_URL
         value: https://fapi.binance.com
       - key: BINANCE_WS_BASE_URL
@@ -69,22 +43,9 @@ services:
       - key: TELEGRAM_CHAT_ID
         sync: false
 
-  - type: web
-    name: binance-sentinel-web
-    runtime: docker
-    region: singapore
-    plan: starter
-    dockerfilePath: ./frontend/Dockerfile
-    dockerContext: .
-    healthCheckPath: /healthz
-    envVars:
-      - key: API_UPSTREAM
-        fromService:
-          type: web
-          name: binance-sentinel-api
-          property: hostport
-
 databases:
   - name: binance-sentinel-db
+    plan: free
+    region: singapore
     databaseName: sentinel
     user: sentinel
